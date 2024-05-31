@@ -15,7 +15,8 @@
     "fmt": {
         "indentWidth": 4,
         "useTabs": false,
-        "lineWidth": 120
+        "lineWidth": 120,
+        "exclude": ["**/*.md"]
     },
     "tasks": {
         "test": "deno test -A",
