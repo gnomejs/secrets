@@ -1,6 +1,63 @@
 import { normalizeKey, type SecretRecord, type Vault } from "./vault-utils.ts";
 import { decodeBase64, encodeBase64 } from "@std/encoding";
-import { isFile } from "@gnome/fs";
+
+// deno-lint-ignore no-explicit-any
+const g = globalThis as any;
+const { Deno, process, localStorage } = g;
+
+let saveFile = (file: string, data: Uint8Array): Promise<void> => {
+    if (localStorage) {
+        localStorage.setItem(file, encodeBase64(data));
+        return Promise.resolve();
+    }
+
+    g.tmpStorage ??= {};
+    g.tmpStorage[file] = encodeBase64(data);
+    return Promise.resolve();
+};
+
+let fileExists = (file: string): Promise<boolean> => {
+    if (localStorage) {
+        return Promise.resolve(localStorage.getItem(file) !== null);
+    }
+
+    return Promise.resolve(g.tmpStorage[file] !== undefined);
+};
+
+let loadFile = (file: string): Promise<Uint8Array> => {
+    if (localStorage) {
+        const data = localStorage.getItem(file);
+        if (data === null) {
+            return Promise.resolve(new Uint8Array());
+        }
+
+        return Promise.resolve(decodeBase64(data));
+    }
+
+    g.tmpStorage ??= {};
+    const data = g.tmpStorage[file];
+    if (data === undefined) {
+        return Promise.resolve(new Uint8Array());
+    }
+
+    return Promise.resolve(decodeBase64(data));
+};
+
+if (Deno !== undefined || process !== undefined) {
+    const { isFile, writeFile, readFile } = await import("@gnome/fs");
+
+    saveFile = async (file: string, data: Uint8Array) => {
+        await writeFile(file, data);
+    };
+
+    fileExists = async (file: string): Promise<boolean> => {
+        return await isFile(file);
+    };
+
+    loadFile = async (file: string): Promise<Uint8Array> => {
+        return await readFile(file);
+    };
+}
 
 /**
  * Represents a JSON vault that stores secrets.
@@ -236,7 +293,7 @@ export class JsonVault implements Vault {
         const encoder = new TextEncoder();
         const encoded = encoder.encode(JSON.stringify(data, null, 2));
 
-        await Deno.writeFile(this.#file, encoded);
+        await saveFile(this.#file, encoded);
     }
 
     /**
@@ -244,12 +301,12 @@ export class JsonVault implements Vault {
      * @returns A promise that resolves when the data is loaded.
      */
     async load(): Promise<void> {
-        if (!await isFile(this.#file)) {
+        if (!await fileExists(this.#file)) {
             this.#loaded = true;
             return;
         }
 
-        const data = await Deno.readFile(this.#file);
+        const data = await loadFile(this.#file);
         const decoder = new TextDecoder();
         const decoded = decoder.decode(data);
 
